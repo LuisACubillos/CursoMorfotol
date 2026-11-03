@@ -4,7 +4,7 @@ Curso corto de morfometría geométrica de contornos de otolitos *sagitta*: de l
 fotografía al análisis de componentes principales, con R. Texto guía:
 Claude, J. (2008). *Morphometrics with R*. Springer.
 
-Página del curso: `index.html` (presentaciones en formato *slidy*).
+**Página del curso:** <https://luisacubillos.github.io/CursoMorfotol/> (presentaciones en formato *slidy*).
 
 ## Módulos
 
