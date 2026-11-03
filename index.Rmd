@@ -1,0 +1,168 @@
+---
+title: "Análisis de contornos de otolitos con R"
+subtitle: "Curso corto de morfometría geométrica de contornos"
+author: "Luis Cubillos"
+date: "`r paste(c('Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre')[as.integer(format(Sys.Date(), '%m'))], format(Sys.Date(), '%Y'))`"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.align = "center")
+```
+
+<style>
+.modulo { border-left: 5px solid #0b4f6c; background: #f4f7f9; padding: 0.6em 1em; margin: 0.8em 0; }
+.modulo h3 { margin-top: 0.2em; }
+</style>
+
+# Presentación
+
+La forma del contorno del otolito *sagitta* es una marca natural usada para
+identificar stocks de peces, porque integra factores genéticos y ambientales que
+cada individuo experimenta. Este curso corto enseña, paso a paso y con R, el
+flujo completo de un análisis de contornos: desde la **fotografía del otolito**
+hasta la exploración de la variación de forma con un **análisis de componentes
+principales**.
+
+```{r portada, fig.width=7, fig.height=3}
+for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f, encoding = "UTF-8")
+G  <- pixmap::read.pnm("datos/otolito_scom.pgm")@grey
+cx <- read.csv("datos/contornos_3zonas.csv")
+par(mfrow = c(1, 2), mar = c(0.5, 0.5, 0.5, 0.5))
+ver_gris(G[100:640, 200:740])
+plot(NA, xlim = c(-700, 700), ylim = c(-350, 350), asp = 1, axes = FALSE, xlab = "", ylab = "")
+for (i in unique(cx$id)[seq(1, 67, by = 3)]) {
+  di <- cx[cx$id == i, ]
+  polygon(di$x - mean(di$x), di$y - mean(di$y), border = adjustcolor("#0b4f6c", 0.5))
+}
+```
+
+**Texto guía**: Claude, J. (2008). *Morphometrics with R*. Springer, Nueva York.
+Las funciones de R que se usan (`Conte`, `regularradius`, `efourier`,
+`iefourier`, `NEF`, `elipse`) son las del libro, con las correcciones de su fe de
+erratas (v1.8).
+
+**Dirigido a**: estudiantes de posgrado, profesionales e investigadores en
+biología pesquera con conocimientos básicos de R.
+
+# Programa
+
+Cada módulo es una presentación HTML (formato *slidy*): use las flechas del
+teclado para avanzar, `C` para ver el índice de diapositivas y `A` para ver todas
+en una sola página. El código de cada diapositiva puede copiarse y ejecutarse en R.
+
+<div class="modulo">
+### [Módulo 1. Introducción a la morfometría geométrica de contornos de otolitos](01_introduccion.html)
+El otolito como marca natural · forma y tamaño · morfometría tradicional vs.
+geométrica · landmarks, pseudolandmarks y configuraciones · métodos de Fourier
+para contornos · índices de forma · flujo de trabajo.
+*Claude (2008), cap. 1, secc. 2.1 y cap. 5.*
+</div>
+
+<div class="modulo">
+### [Módulo 2. Preparación de imágenes: escala de grises, binarización y contorno](02_imagenes_binarizacion.html)
+La imagen como matriz · lectura con `pixmap` · profundidad de gris, contraste e
+inversión · histograma · binarización manual y por el método de Otsu ·
+extracción del contorno con `Conte()` · calibración de la escala.
+*Claude (2008), secc. 2.1.1, 2.2.5 y 2.2.6.*
+</div>
+
+<div class="modulo">
+### [Módulo 3. Pseudolandmarks a lo largo del contorno](03_pseudolandmarks.html)
+Abscisa curvilínea y radios equiangulares (`regularradius()`) · muestreo
+equidistante por perímetro · número de puntos · punto de inicio y sentido de
+recorrido · descriptores de tamaño e índices de forma · procesamiento por lotes.
+*Claude (2008), secc. 2.3.3 y 5.2.1.*
+</div>
+
+<div class="modulo">
+### [Módulo 4. Preparación de datos de contornos: CSV y XLSX](04_datos_csv_xlsx.html)
+Configuraciones como matriz, arreglo y data.frame · formatos apilado, largo y
+ancho · tabla de metadatos · leer y escribir CSV (`read.csv`, `write.csv2`) y XLSX
+(`readxl`, `writexl`) · validación · conversiones entre formatos.
+*Claude (2008), secc. 2.1.2 y 2.4.*
+</div>
+
+<div class="modulo">
+### [Módulo 5. Descriptores de forma: Transformada Elíptica de Fourier](05_fourier_eliptico.html)
+Fourier de radios, de ángulo tangente y elíptico · `efourier()` e `iefourier()` ·
+reconstrucción con armónicos crecientes · normalización con `NEF()` y fe de
+erratas · matriz de coeficientes · poder acumulado.
+*Claude (2008), secc. 5.2.*
+</div>
+
+<div class="modulo">
+### [Módulo 6. Análisis de componentes principales de contornos](06_acp.html)
+Selección de armónicos por poder y varianza · ACP con `princomp()` · varianza
+explicada, puntajes y cargas · reconstrucción de formas extremas · morfoespacio ·
+interpretación y precauciones.
+*Claude (2008), secc. 6.1.2.*
+</div>
+
+# Datos del curso
+
+| Archivo | Contenido |
+|---|---|
+| `datos/otolito_scom.pgm` | Imagen de un otolito de sardina común (684 × 912 píxeles, grises) |
+| `datos/mcolaz1.txt` … `mcolaz3.txt` | Contornos de merluza de cola (50 puntos x, y por otolito): Chiloé (26), Aysén (20), Magallanes (21) |
+| `datos/oto0101.csv` | Un contorno de 50 puntos (ejemplo de CSV) |
+| `datos/contornos_3zonas.csv` / `.xlsx` | Contornos en formato largo (generados en el módulo 4) |
+| `datos/coef_nef_3zonas.csv` | Coeficientes de Fourier normalizados (módulo 5) |
+
+```{r tabla-zonas}
+data.frame(Código = c("Ch", "Ay", "Ma"),
+           Zona = c("Sistema Estuarino Chiloé", "Sistema Estuarino Aysén", "Sistema Estuarino Magallanes"),
+           Otolitos = c(26, 20, 21),
+           `LT promedio (cm)` = c(60.6, 53.1, 82.5), check.names = FALSE)
+```
+
+# Cómo usar el material
+
+1. Descargue o clone el repositorio y abra la carpeta del curso en RStudio
+   (el directorio de trabajo debe ser la carpeta que contiene `index.Rmd`).
+2. Instale los paquetes:
+
+```{r eval=FALSE, echo=TRUE}
+install.packages(c("pixmap", "readxl", "writexl", "rmarkdown", "knitr"))
+install.packages("magick")   # opcional: convertir .jpg/.tif a .pgm/.ppm
+```
+
+3. Cargue las funciones del curso:
+
+```{r eval=FALSE, echo=TRUE}
+for (f in list.files("R", full.names = TRUE)) source(f)
+```
+
+4. Abra cada `0X_*.Rmd` y ejecute los bloques de código en orden, o regenere
+   todas las presentaciones con:
+
+```{r eval=FALSE, echo=TRUE}
+source("_render.R")
+```
+
+Los módulos se encadenan: el 4 crea `datos/contornos_3zonas.csv`, que leen los
+módulos 5 y 6.
+
+# Referencias
+
+- Cadrin, S.X., Friedland, K.D. y Waldman, J.R. (eds.) (2005). *Stock Identification
+  Methods: Applications in Fishery Science*. Elsevier Academic Press.
+- Campana, S.E. (2004). *Photographic Atlas of Fish Otoliths of the Northwest
+  Atlantic Ocean*. NRC Research Press.
+- Campana, S.E. y Casselman, J.M. (1993). Stock discrimination using otolith shape
+  analysis. *Canadian Journal of Fisheries and Aquatic Sciences* 50: 1062–1083.
+- **Claude, J. (2008). *Morphometrics with R*. Springer, Nueva York.**
+- Ferson, S., Rohlf, F.J. y Koehn, R.K. (1985). Measuring shape variation of
+  two-dimensional outlines. *Systematic Zoology* 34: 59–68.
+- Kuhl, F.P. y Giardina, C.R. (1982). Elliptic Fourier features of a closed contour.
+  *Computer Graphics and Image Processing* 18: 236–258.
+
+---
+
+<small>Material docente. Contacto: Luis Cubillos.
+Generado con R `r getRversion()` y rmarkdown el `r format(Sys.Date(), '%d-%m-%Y')`.</small>

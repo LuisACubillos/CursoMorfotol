@@ -1,0 +1,243 @@
+---
+title: "Módulo 5. Descriptores de forma: Transformada Elíptica de Fourier"
+subtitle: "Curso corto: Análisis de contornos de otolitos con R"
+author: "Luis Cubillos"
+date: "`r paste(c('Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre')[as.integer(format(Sys.Date(), '%m'))], format(Sys.Date(), '%Y'))`"
+output:
+  slidy_presentation:
+    css: estilo.css
+    font_adjustment: -4
+    footer: "Contornos de otolitos con R · Módulo 5 · Fuente: Claude (2008), secc. 5.2.3 y 6.1.2"
+    fig_width: 9
+    fig_height: 4.5
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", comment = "#>")
+for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f, encoding = "UTF-8")
+```
+
+## Objetivos del módulo
+
+1. Entender el contorno como una **suma de elipses** (armónicos).
+2. Calcular los coeficientes de Fourier elíptico con `efourier()` y reconstruir
+   el contorno con `iefourier()`.
+3. **Normalizar** los coeficientes (tamaño, rotación, punto de inicio) con `NEF()`.
+4. Construir la **matriz de coeficientes** de todos los otolitos.
+5. Elegir el **número de armónicos** a retener.
+
+```{r datos}
+cx <- read.csv("datos/contornos_3zonas.csv")      # módulo 4
+A  <- largo_a_array(cx)                           # arreglo 50 x 2 x 67
+zona <- factor(cx$zona[cx$punto == 1], levels = c("Ch", "Ay", "Ma"))
+M  <- A[, , 1]                                    # un otolito de Chiloé
+```
+
+# Análisis de Fourier de contornos
+
+## Idea
+
+Una función periódica se descompone en una suma de senos y cosenos de
+frecuencia creciente (**armónicos**). Para un contorno cerrado hay tres
+opciones (Claude 2008, secc. 5.2):
+
+1. **Radios** desde el centroide en función del ángulo, *r(θ)*.
+2. **Ángulo tangente** en función del perímetro, *φ(t)*.
+3. **Elíptico**: descomponer **por separado** *x(t)* e *y(t)* en función de la
+   abscisa curvilínea *t* (Kuhl y Giardina 1982).
+
+El Fourier elíptico no requiere que el contorno sea "estrellado" desde el
+centroide y es el estándar en otolitos.
+
+## Fourier elíptico
+
+$$x(t) = \frac{a_0}{2} + \sum_{n=1}^{N}\left[a_n\cos\frac{2\pi nt}{T} + b_n\sin\frac{2\pi nt}{T}\right]$$
+
+$$y(t) = \frac{c_0}{2} + \sum_{n=1}^{N}\left[c_n\cos\frac{2\pi nt}{T} + d_n\sin\frac{2\pi nt}{T}\right]$$
+
+- *t*: distancia recorrida sobre el contorno; *T*: perímetro.
+- Cada armónico *n* es una **elipse** con 4 coeficientes $(a_n, b_n, c_n, d_n)$.
+- $a_0, c_0$: posición del centroide.
+
+Estimación discreta con *p* puntos (Kuhl y Giardina 1982):
+
+$$a_n = \frac{T}{2\pi^2n^2}\sum_{i=1}^{p}\frac{\Delta x_i}{\Delta t_i}\left[\cos\frac{2\pi n t_i}{T}-\cos\frac{2\pi n t_{i-1}}{T}\right]$$
+
+y análogamente $b_n$ (seno), $c_n$ y $d_n$ (con $\Delta y_i$).
+
+## `efourier()` (Claude 2008, función 5.8)
+
+```{r efourier}
+ef <- efourier(M)          # por defecto n = p/2 = 25 armónicos
+str(ef)
+round(with(ef, cbind(an, bn, cn, dn))[1:5, ], 2)
+```
+
+## Cada armónico es una elipse
+
+```{r elipses, fig.width=10, fig.height=3.4}
+tam <- sqrt(ef$an^2 + ef$bn^2 + ef$cn^2 + ef$dn^2)    # tamaño de cada elipse
+par(mfrow = c(1, 4), mar = c(1, 1, 2.5, 1))
+for (n in 1:4) {
+  cf <- function(v) replace(numeric(25), n, v[n])     # solo el armónico n
+  e  <- iefourier(cf(ef$an), cf(ef$bn), cf(ef$cn), cf(ef$dn), 25, 100)
+  plot(e, type = "l", asp = 1, axes = FALSE, xlab = "", ylab = "", lwd = 2,
+       main = sprintf("Armónico %d\n(%.1f %% del 1º)", n, 100 * tam[n] / tam[1]))
+  points(e$x[1], e$y[1], pch = 19, col = "red")       # posición en t = 0
+}
+```
+
+Cada panel tiene su propia escala. El 1º describe la elipse que mejor se ajusta
+al contorno; los siguientes son elipses cada vez **más pequeñas** que se recorren
+*n* veces por vuelta y agregan detalle.
+
+## Reconstrucción con `iefourier()` (función 5.9)
+
+```{r reconstruccion, fig.width=10, fig.height=3.6}
+par(mfrow = c(1, 5), mar = c(0.5, 0.5, 2, 0.5))
+for (k in c(1, 3, 6, 12, 25)) {
+  r <- iefourier(ef$an, ef$bn, ef$cn, ef$dn, k, 200, ef$ao, ef$co)
+  plot(M, type = "n", asp = 1, axes = FALSE, xlab = "", ylab = "", main = paste(k, "armónicos"))
+  polygon(M, col = "grey85", border = NA)
+  lines(c(r$x, r$x[1]), c(r$y, r$y[1]), col = "red", lwd = 1.5)
+}
+```
+
+Los armónicos altos contienen sobre todo **ruido de digitalización**.
+
+## Error de reconstrucción
+
+```{r error, fig.width=7, fig.height=3.8}
+err <- sapply(1:25, function(k) {
+  r <- iefourier(ef$an, ef$bn, ef$cn, ef$dn, k, 50, ef$ao, ef$co)
+  mean(sqrt(rowSums((cbind(r$x, r$y) - M)^2)))
+})
+par(mar = c(4.5, 4.5, 1, 1))
+plot(1:25, err, type = "b", pch = 19, xlab = "Nº de armónicos",
+     ylab = "Distancia media al contorno")
+```
+
+Claude (2008, p. 223): la bondad de ajuste se evalúa con la distancia entre el
+contorno original y el reconstruido. *(Comparar punto a punto supone que la
+reconstrucción parte del mismo punto que los datos, lo que se cumple aquí.)*
+
+# Normalización
+
+## ¿Por qué normalizar?
+
+Los coeficientes de `efourier()` dependen del **tamaño**, la **orientación**, la
+**posición** y el **punto de inicio** del contorno. Para comparar formas hay que
+eliminar esos efectos.
+
+`NEF()` (Claude 2008, función 5.10; Ferson et al. 1985) usa la **primera elipse**:
+
+$$\begin{pmatrix}A_n & B_n\\ C_n & D_n\end{pmatrix} = \frac{1}{\text{escala}}
+\begin{pmatrix}\cos\psi & \sin\psi\\ -\sin\psi & \cos\psi\end{pmatrix}
+\begin{pmatrix}a_n & b_n\\ c_n & d_n\end{pmatrix}
+\begin{pmatrix}\cos n\theta & -\sin n\theta\\ \sin n\theta & \cos n\theta\end{pmatrix}$$
+
+- **escala**: semieje mayor de la 1ª elipse → elimina el tamaño;
+- $\psi$: orientación de la 1ª elipse → elimina la rotación;
+- $\theta$: desfase del punto inicial respecto del semieje mayor → elimina el punto de inicio;
+- se omiten $a_0, c_0$ → elimina la posición.
+
+## Demostración: mismo otolito, distinta posición
+
+```{r invariancia}
+rot <- function(M, a) M %*% matrix(c(cos(a), sin(a), -sin(a), cos(a)), 2, 2)
+M_b <- rot(M, pi / 4) * 2.5 + 300              # rotado, agrandado y trasladado
+M_c <- M[c(11:50, 1:10), ]                     # otro punto de inicio
+coefs <- function(M) { N <- NEF(M); round(c(N$A[2:3], N$B[2:3], N$C[2:3], N$D[2:3]), 4) }
+rbind(original = coefs(M), transformado = coefs(M_b), otro_inicio = coefs(M_c))
+```
+
+```{r sin-normalizar}
+round(rbind(original = efourier(M)$an[2:3], transformado = efourier(M_b)$an[2:3]), 1)
+```
+
+Los coeficientes **normalizados** son iguales; los **crudos**, no.
+
+## Fe de erratas de Claude (2008, pp. 225–226)
+
+- La fórmula clásica no siempre identifica el **semieje mayor**; el punto de
+  inicio puede caer en cualquiera de los **dos polos** de la 1ª elipse.
+- La versión de `NEF()` del curso **incluye la corrección** (restringe el desfase
+  a $[-\pi/2, \pi/2]$), suponiendo que el punto inicial está en una región
+  **similar** del contorno en todos los otolitos.
+
+::: clave
+Por eso, aun con normalización, conviene **digitalizar siempre desde la misma
+zona** (p. ej., el rostro) y con la misma orientación (módulo 3).
+:::
+
+## Coeficientes normalizados de un otolito
+
+```{r nef}
+N <- NEF(M)
+round(rbind(A = N$A[1:5], B = N$B[1:5], C = N$C[1:5], D = N$D[1:5]), 4)
+```
+
+Tras normalizar: $A_1 = 1$ y $B_1 = C_1 = 0$ son **constantes**; $D_1$ es la razón
+ancho/largo de la 1ª elipse. El 1er armónico se **excluye** del análisis
+multivariado (salvo, eventualmente, $D_1$).
+
+# Matriz de coeficientes
+
+## Todos los otolitos
+
+```{r matriz}
+nh <- 25
+coef <- t(apply(A, 3, function(m) { N <- NEF(m); c(N$A, N$B, N$C, N$D) }))
+colnames(coef) <- paste0(rep(c("A", "B", "C", "D"), each = nh), 1:nh)
+dim(coef)                       # otolitos x (4 x 25)
+round(coef[1:3, c("A2", "B2", "C2", "D2", "A3")], 4)
+```
+
+Orden de columnas: A1…A25, B1…B25, C1…C25, D1…D25.
+
+## ¿Cuántos armónicos retener? Poder acumulado
+
+Claude (2008, p. 245): el **poder** de cada armónico es la suma de los cuadrados
+de sus coeficientes; mide cuánto de la **forma** reconstruye.
+
+```{r poder, fig.width=7, fig.height=4}
+power <- rowSums(matrix(colSums(coef^2), nh, 4))    # suma de A^2+B^2+C^2+D^2 por armónico
+poder <- cumsum(power[-1]) / sum(power[-1])          # sin el 1er armónico
+par(mar = c(4.5, 4.5, 1, 1))
+plot(2:nh, poder, type = "b", pch = 19, ylim = c(min(poder), 1),
+     xlab = "Armónico", ylab = "Poder acumulado")
+abline(h = c(0.99, 0.999), lty = 3); abline(v = 12, lty = 2, col = "red")
+```
+
+```{r}
+min(which(poder >= 0.99)) + 1       # primer armónico que alcanza 99 % del poder
+```
+
+El criterio de **varianza** entre individuos se ve en el módulo 6.
+
+## Guardar los coeficientes
+
+```{r guardar}
+coef_df <- data.frame(id = dimnames(A)[[3]], zona = zona, coef)
+write.csv(coef_df, "datos/coef_nef_3zonas.csv", row.names = FALSE)
+```
+
+## Resumen y ejercicio
+
+::: clave
+50 puntos (x, y) → `efourier()` → 25 armónicos × 4 coeficientes → `NEF()` →
+coeficientes invariantes → matriz otolitos × coeficientes
+:::
+
+**Ejercicio**
+
+1. Reconstruya el primer otolito de Aysén con 4, 8 y 12 armónicos.
+2. Verifique que `NEF()` da los mismos coeficientes si el contorno se recorre en
+   **sentido inverso** (`M[50:1, ]`). ¿Qué ocurre?
+3. ¿Con cuántos armónicos se alcanza 99.9 % del poder?
+
+<p class="fuente">Ferson, S., Rohlf, F.J. y Koehn, R.K. (1985). Measuring shape variation of
+two-dimensional outlines. <em>Syst. Zool.</em> 34: 59–68.
+Kuhl, F.P. y Giardina, C.R. (1982). <em>Comput. Graph. Image Process.</em> 18: 236–258.</p>

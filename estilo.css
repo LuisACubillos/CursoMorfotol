@@ -1,0 +1,41 @@
+/* Estilo común de las presentaciones slidy del curso */
+body {
+  font-family: "Source Sans Pro", "Helvetica Neue", Arial, sans-serif;
+  color: #1f2a33;
+}
+div.slide h1, div.slide h2 {
+  color: #0b4f6c;
+  border-bottom: 3px solid #4f9db8;
+  padding-bottom: 0.15em;
+  font-size: 1.45em;
+  margin-top: 0.3em;
+}
+div.titlepage h1.title { color: #0b4f6c; font-size: 1.9em; }
+div.titlepage p.subtitle { color: #4f9db8; font-size: 1.2em; }
+div.title-slide { background: #0b4f6c; }
+div.title-slide h1 { color: #ffffff; border: none; margin-top: 18%; text-align: center; font-size: 2.2em; }
+pre, code { font-family: "Fira Code", Menlo, Consolas, monospace; }
+pre { background: #f4f7f9; border-left: 4px solid #4f9db8; padding: 0.4em 0.6em; font-size: 0.8em;
+      white-space: pre-wrap; word-break: break-word; }
+pre code { background: none; }
+code { color: #8a3b12; }
+table { border-collapse: collapse; margin: 0.5em auto; font-size: 0.9em; }
+th { background: #0b4f6c; color: #ffffff; padding: 0.25em 0.6em; }
+td { border-bottom: 1px solid #d0dbe2; padding: 0.25em 0.6em; }
+img { max-width: 95%; }
+.nota {
+  background: #fff6e0; border-left: 5px solid #e0a800;
+  padding: 0.4em 0.8em; margin: 0.5em 0; font-size: 0.92em;
+}
+.clave {
+  background: #e8f3f7; border-left: 5px solid #0b4f6c;
+  padding: 0.4em 0.8em; margin: 0.5em 0;
+}
+.fuente { color: #6b7a86; font-size: 0.8em; }
+.cols { display: flex; gap: 2em; align-items: flex-start; }
+.cols > div { flex: 1; }
+div.footer { color: #6b7a86; }
+pre > code.sourceCode, pre code { white-space: pre-wrap !important; }
+pre > code.sourceCode > span { display: inline; }
+div.slide p, div.slide li { line-height: 1.35; }
+div.slide pre:not(.sourceCode) { font-size: 0.68em !important; }

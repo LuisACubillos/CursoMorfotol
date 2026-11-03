@@ -1,0 +1,335 @@
+---
+title: "Módulo 2. Preparación de imágenes: escala de grises, binarización y contorno"
+subtitle: "Curso corto: Análisis de contornos de otolitos con R"
+author: "Luis Cubillos"
+date: "`r paste(c('Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre')[as.integer(format(Sys.Date(), '%m'))], format(Sys.Date(), '%Y'))`"
+output:
+  slidy_presentation:
+    css: estilo.css
+    font_adjustment: -4
+    footer: "Contornos de otolitos con R · Módulo 2 · Fuente: Claude (2008), secc. 2.1.1 y 2.2.5–2.2.6"
+    fig_width: 9
+    fig_height: 4.5
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", comment = "#>")
+for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f, encoding = "UTF-8")
+```
+
+## Objetivos del módulo
+
+1. Entender una imagen digital como una **matriz** de valores.
+2. Leer imágenes en R con el paquete `pixmap` y convertirlas a **escala de grises**.
+3. Ajustar contraste y **binarizar** con un umbral (manual y automático).
+4. **Extraer el contorno** del otolito con la función `Conte()` de Claude (2008).
+5. Calibrar la **escala** (píxeles → mm).
+
+```{r paquetes}
+library(pixmap)     # lectura de imágenes PNM (.ppm, .pgm)
+# Funciones de Claude (2008) en la carpeta R/ del curso
+for (f in list.files("R", full.names = TRUE)) source(f)
+```
+
+# Imágenes digitales
+
+## Una imagen es una matriz
+
+Claude (2008, secc. 2.1.1):
+
+- **Binaria** (blanco y negro): cada píxel vale 0 o 1.
+- **Escala de grises**: cada píxel toma un valor entre 0 (negro) y 1 (blanco),
+  con $2^n$ niveles (8 bits = 256 niveles).
+- **Color (RGB)**: tres valores por píxel (rojo, verde, azul) → un **arreglo**
+  de 3 capas, o tres matrices.
+
+::: clave
+Fila y columna de la matriz = posición del píxel; el valor de la celda = nivel de gris.
+Toda la manipulación de imágenes se reduce a **operaciones con matrices**.
+:::
+
+```{r}
+m <- matrix(c(0, 0, 1, 1,
+              0, 1, 1, 0,
+              1, 1, 0, 0), 3, 4, byrow = TRUE)
+m
+```
+
+## Formatos y conversión
+
+- `pixmap` lee el formato **PNM**: `.ppm` (color), `.pgm` (grises), `.pbm` (binario).
+- Las fotos de lupa suelen venir en `.jpg` o `.tif`: se convierten con GIMP,
+  ImageMagick (`magick foto.jpg foto.ppm`) o desde R con el paquete `magick`:
+
+```{r eval=FALSE}
+library(magick)
+im <- image_read("Fotos/oto_001.jpg")
+im <- image_convert(im, colorspace = "gray")   # opcional: a grises
+im <- image_scale(im, "25%")                    # opcional: reducir resolución
+image_write(im, "Fotos/oto_001.pgm", format = "pgm")
+```
+
+::: nota
+La imagen del curso (`datos/otolito_scom.pgm`) es un otolito de **sardina común**
+fotografiado con luz reflejada sobre fondo negro. El original (3648 × 2736 píxeles,
+30 MB) se redujo tomando 1 de cada 4 píxeles para acelerar los cálculos.
+:::
+
+## Leer la imagen con `pixmap`
+
+```{r leer}
+img <- read.pnm("datos/otolito_scom.pgm")
+class(img)
+G <- img@grey            # matriz de grises: filas x columnas
+dim(G)
+range(G)
+G[300:303, 400:404]      # una pequeña ventana de la matriz
+```
+
+Si la imagen es a color (`.ppm`), primero se convierte a grises:
+
+```{r eval=FALSE}
+img <- read.pnm("foto.ppm")          # objeto pixmapRGB (capas @red, @green, @blue)
+img <- as(img, "pixmapGrey")         # promedio ponderado de los tres canales
+```
+
+## Mostrar la imagen
+
+```{r ver, fig.width=10, fig.height=4}
+par(mfrow = c(1, 2), mar = c(2, 2, 2, 1))
+ver_gris(G, main = "ver_gris(G)", ejes = TRUE)
+image(t(G[nrow(G):1, ]), col = gray(0:255 / 255), asp = nrow(G) / ncol(G),
+      axes = FALSE, main = "image(t(G[nrow(G):1, ]))")
+```
+
+::: nota
+**Ojo con la orientación**: en la matriz la fila 1 es la parte **superior** de la
+imagen, pero en un gráfico *y* crece hacia arriba. `image(G)` sin invertir dibuja
+la imagen girada (Claude 2008, p. 48). `ver_gris()` (función del curso) usa
+`x = columna` e `y = nº filas − fila`, igual que `Conte()`.
+:::
+
+## Profundidad de gris
+
+Claude (2008, fig. 2.6): la misma imagen con 256, 4 y 2 niveles de gris.
+
+```{r profundidad, fig.width=10, fig.height=3.6}
+par(mfrow = c(1, 3), mar = c(1, 1, 2, 1))
+ver_gris(G,                     main = "8 bits: 256 niveles")
+ver_gris(round(G * 3) / 3,      main = "2 bits: 4 niveles")
+ver_gris(round(G),              main = "1 bit: 2 niveles (binaria)")
+```
+
+Con 1 bit ya se separa el otolito del fondo: esa es la idea de la **binarización**.
+
+## Ajustar contraste, invertir, aclarar
+
+Claude (2008, pp. 45–46): operaciones aritméticas sobre la matriz.
+
+```{r ajustes, fig.width=10, fig.height=3.6}
+G_con <- (G - min(G)) / diff(range(G))   # estira el rango a [0, 1]
+G_inv <- 1 - G                           # invierte: el otolito queda oscuro
+G_osc <- G^2                             # potencia > 1 oscurece; < 1 aclara
+par(mfrow = c(1, 3), mar = c(1, 1, 2, 1))
+ver_gris(G_con, main = "Contraste estirado")
+ver_gris(G_inv, main = "Invertida: 1 - G")
+ver_gris(G_osc, main = "G^2")
+```
+
+Mejorar el contraste **antes** de binarizar facilita separar el objeto del fondo.
+
+## Histograma de niveles de gris
+
+```{r histograma, fig.width=9, fig.height=4}
+hist(G, breaks = 100, col = "grey80", border = NA, main = "",
+     xlab = "Nivel de gris (0 = negro, 1 = blanco)", ylab = "Nº de píxeles")
+abline(v = c(0.2, 0.35, 0.6), col = c("orange", "red", "purple"), lwd = 2, lty = 2)
+```
+
+- Pico grande en valores bajos: el **fondo** negro.
+- Cola de valores altos: el **otolito** (claro).
+- El **umbral** debe caer en el valle entre ambos.
+
+# Binarización
+
+## Umbral manual
+
+Cada píxel pasa a **objeto (0, negro)** o **fondo (1, blanco)** según el umbral.
+`Conte()` espera el objeto en negro.
+
+```{r binarizar}
+binarizar <- function(G, umbral) {
+  B <- ifelse(G > umbral, 0, 1)                      # otolito (claro) -> 0
+  B[c(1, nrow(B)), ] <- 1; B[, c(1, ncol(B))] <- 1   # marco blanco de seguridad
+  B
+}
+```
+
+```{r umbrales, fig.width=10, fig.height=3.6}
+par(mfrow = c(1, 3), mar = c(1, 1, 2, 1))
+for (u in c(0.2, 0.35, 0.6)) ver_gris(binarizar(G, u)[150:550, 250:650], main = paste("umbral =", u))
+```
+
+## ¿Qué umbral elegir?
+
+- **Muy bajo** (0.2): incluye sombras y reflejos del fondo; el borde se "engorda".
+- **Muy alto** (0.6): se pierden las zonas translúcidas del borde y aparecen
+  **huecos** dentro del otolito.
+- **Intermedio** (0.35): borde limpio.
+
+::: clave
+El umbral es subjetivo: se fija **una vez** y se aplica a **todas** las imágenes
+tomadas con la misma iluminación y aumento.
+:::
+
+```{r area}
+B <- binarizar(G, 0.35)
+sum(B == 0)        # superficie del otolito en píxeles (Claude 2008, p. 44)
+```
+
+## Umbral automático (método de Otsu)
+
+*Complemento* (no está en Claude 2008): Otsu (1979) elige el umbral que
+**maximiza la varianza entre** las dos clases (fondo y objeto).
+
+```{r otsu}
+umbral_otsu <- function(G, nb = 256) {
+  h  <- hist(G, breaks = seq(0, 1, length = nb + 1), plot = FALSE)
+  p  <- h$counts / sum(h$counts)          # probabilidad de cada nivel
+  w  <- cumsum(p)                         # peso de la clase "fondo"
+  mu <- cumsum(p * h$mids)                # media acumulada
+  sb <- (mu[nb] * w - mu)^2 / (w * (1 - w))   # varianza entre clases
+  h$mids[which.max(sb)]
+}
+umbral_otsu(G)
+```
+
+Útil como punto de partida o para procesar lotes; igual hay que **revisar** el
+resultado visualmente.
+
+# Extracción del contorno
+
+## La función `Conte()` (Claude 2008, función 2.1)
+
+Algoritmo de **seguimiento de bordes** con 8 vecinos:
+
+1. Parte de un punto **dentro** del objeto y avanza hacia la **izquierda** hasta
+   encontrar un cambio de valor: ese es el primer píxel del contorno.
+2. Examina los vecinos del píxel actual girando en **sentido horario** hasta
+   encontrar el siguiente píxel del borde.
+3. Repite hasta volver al punto de partida.
+
+```{r eval=FALSE}
+Conte(x, imagematrix)
+# x:           c(x, y) de un punto dentro del objeto, en su parte izquierda
+# imagematrix: matriz de la imagen (binarizada)
+# Devuelve:    list(X, Y) con las coordenadas de todos los píxeles del borde
+```
+
+El resultado tiene un punto por píxel: la **abscisa curvilínea** es de 1 píxel.
+
+## Punto inicial y coordenadas
+
+- En el libro, el punto inicial se marca con el ratón: `locator(1)`.
+- Para que sea **reproducible**, aquí se usa la mediana de los píxeles del objeto.
+- Coordenadas del gráfico: **x = columna**, **y = nº de filas − fila**.
+
+```{r conte}
+pix <- which(B == 0, arr.ind = TRUE)                  # (fila, columna) del otolito
+inicio <- c(round(median(pix[, "col"])),              # x
+            nrow(B) - round(median(pix[, "row"])))    # y
+cont <- Conte(inicio, B)
+str(cont)
+length(cont$X)                                        # nº de píxeles del borde
+```
+
+## Contorno extraído
+
+```{r fig-conte, fig.width=8, fig.height=5}
+par(mar = c(1, 1, 1, 1))
+ver_gris(G)
+lines(cont$X, cont$Y, col = "red", lwd = 2)
+points(inicio[1], inicio[2], pch = 3, col = "yellow", cex = 2, lwd = 2)
+arrows(inicio[1], cont$Y[1], cont$X[1], cont$Y[1], length = 0.1, col = "yellow", lwd = 2)
+```
+
+Cruz: punto inicial. Flecha: desplazamiento hacia la izquierda hasta el borde.
+
+## Cuidado con los huecos
+
+Con umbral 0.6 el otolito tiene huecos; si el desplazamiento hacia la izquierda
+encuentra un **hueco** antes que el borde externo, `Conte()` recorre el hueco:
+
+```{r huecos, fig.width=8, fig.height=4}
+B6 <- binarizar(G, 0.6)
+p6 <- which(B6 == 0, arr.ind = TRUE)
+i6 <- c(round(median(p6[, "col"])), nrow(B6) - round(median(p6[, "row"])))
+c6 <- Conte(i6, B6)
+length(c6$X)            # ¡muy pocos píxeles!
+par(mar = c(1, 1, 1, 1))
+ver_gris(B6[150:550, 250:650])
+lines(c6$X - 249, c6$Y - (nrow(G) - 550), col = "red", lwd = 3)
+points(mean(c6$X) - 249, mean(c6$Y) - (nrow(G) - 550), cex = 6, col = "red", lwd = 2)  # el "contorno"
+```
+
+Soluciones: bajar el umbral, mover el punto inicial o **rellenar** los huecos.
+Con algunos puntos iniciales mal ubicados `Conte()` puede incluso **no terminar**
+nunca: si tarda más de unos segundos, interrumpa (Esc) y revise la binarización.
+
+## Alternativa interactiva (como en el libro)
+
+```{r eval=FALSE}
+ver_gris(B)
+ini  <- locator(1)                       # clic DENTRO del otolito, en su lado izquierdo
+cont <- Conte(c(round(ini$x), round(ini$y)), B)
+lines(cont$X, cont$Y, col = "red", lwd = 2)
+```
+
+`locator()` lee la posición del cursor cada vez que se presiona el botón
+izquierdo del ratón (Claude 2008, secc. 2.2.6). Solo funciona en una sesión
+interactiva (RStudio o R), no al tejer el documento.
+
+# Escala
+
+## De píxeles a milímetros
+
+Fotografiar el otolito **junto a una escala** (regla o micrómetro). Claude (2008, p. 26):
+
+$$\text{coordenadas reales} = \frac{\text{coordenadas en la imagen} \times \text{tamaño real de la escala}}{\text{tamaño de la escala en la imagen}}$$
+
+```{r eval=FALSE}
+ver_gris(G)
+a <- locator(2, type = "o", pch = 8, lwd = 2, col = "green")  # extremos de 1 mm
+escala_px <- sqrt(diff(a$x)^2 + diff(a$y)^2)                   # píxeles por mm
+X_mm <- cont$X / escala_px
+Y_mm <- cont$Y / escala_px
+```
+
+::: nota
+Si la imagen se redujo (1 de cada 4 píxeles), la escala debe medirse **en la
+imagen reducida** o dividirse por 4. Cuidado también con píxeles no cuadrados
+(relaciones 4:3, 16:9; Claude 2008, p. 43).
+:::
+
+## Resumen y ejercicio
+
+::: clave
+imagen → `read.pnm()` → grises (`@grey`) → histograma → `binarizar()` → `Conte()` → contorno en píxeles
+:::
+
+**Ejercicio**
+
+1. Binarice la imagen con los umbrales 0.25, 0.30, 0.40 y 0.45. ¿Cambia el número
+   de píxeles del contorno? ¿Y el área?
+2. Calcule el umbral de Otsu sobre la imagen invertida (`1 - G`). ¿Qué ocurre?
+3. Desplace el punto inicial 100 píxeles a la derecha. ¿Obtiene el mismo contorno?
+4. Guarde el contorno en un objeto `cont` para el módulo 3:
+
+```{r guardar}
+saveRDS(cont, "datos/contorno_pixeles.rds")
+```
+
+<p class="fuente">Otsu, N. (1979). A threshold selection method from gray-level histograms.
+<em>IEEE Trans. Syst. Man Cybern.</em> 9: 62–66.</p>

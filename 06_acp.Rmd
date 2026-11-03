@@ -1,0 +1,278 @@
+---
+title: "Módulo 6. Análisis de componentes principales de contornos"
+subtitle: "Curso corto: Análisis de contornos de otolitos con R"
+author: "Luis Cubillos"
+date: "`r paste(c('Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre')[as.integer(format(Sys.Date(), '%m'))], format(Sys.Date(), '%Y'))`"
+output:
+  slidy_presentation:
+    css: estilo.css
+    font_adjustment: -4
+    footer: "Contornos de otolitos con R · Módulo 6 · Fuente: Claude (2008), secc. 6.1.2"
+    fig_width: 9
+    fig_height: 4.5
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", comment = "#>")
+for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f, encoding = "UTF-8")
+```
+
+## Objetivos del módulo
+
+1. Elegir los armónicos con los criterios de **poder** y **varianza**.
+2. Ajustar un **ACP** sobre los coeficientes de Fourier normalizados.
+3. Interpretar la **varianza explicada**, los **puntajes** y las **cargas**.
+4. **Reconstruir** las formas asociadas a cada componente.
+5. Explorar si las **zonas** ocupan regiones distintas del morfoespacio.
+
+```{r datos}
+cf   <- read.csv("datos/coef_nef_3zonas.csv")          # módulo 5
+zona <- factor(cf$zona, levels = c("Ch", "Ay", "Ma"))
+coef <- as.matrix(cf[, -(1:2)])                         # A1..A25, B.., C.., D..
+nh   <- 25
+col_z <- c(Ch = "black", Ay = "red", Ma = "blue")
+nom_z <- c(Ch = "Chiloé", Ay = "Aysén", Ma = "Magallanes")
+table(zona)
+```
+
+# Selección de variables
+
+## Poder y varianza acumulados (Claude 2008, p. 245)
+
+- **Poder**: cuánto de la **forma** reconstruye cada armónico (módulo 5).
+- **Varianza**: cuánto de la **variación entre individuos** contiene.
+
+```{r criterios}
+power     <- rowSums(matrix(colSums(coef^2), nh, 4))
+variacion <- rowSums(matrix(apply(coef, 2, var), nh, 4))
+tab <- data.frame(armonico = 2:nh,
+                  poder    = cumsum(power[-1]) / sum(power[-1]),
+                  varianza = cumsum(variacion[-1]) / sum(variacion[-1]))
+round(tab[1:13, ], 3)
+```
+
+## Armónicos 2 a 12
+
+```{r fig-criterios, fig.width=7, fig.height=4}
+par(mar = c(4.5, 4.5, 1, 1))
+plot(tab$armonico[1:15], tab$poder[1:15], ylim = c(0, 1), pch = 1,
+     xlab = "Armónico", ylab = "Proporción acumulada")
+points(tab$armonico[1:15] + 0.2, tab$varianza[1:15], pch = 19, col = "grey50")
+abline(h = c(0.95, 0.99), lty = 3); abline(v = 12.1, lty = 2, col = "red")
+legend("bottomright", c("Poder", "Varianza"), pch = c(1, 19), col = c(1, "grey50"), bty = "n")
+```
+
+Se retienen los armónicos **2–12**: > 99 % del poder y ≈ 95 % de la varianza
+→ 11 × 4 = **44 variables**.
+
+```{r seleccion}
+na <- 12
+cols_an    <- c(2:na, nh + 2:na, 2 * nh + 2:na, 3 * nh + 2:na)   # 44 variables para el ACP
+cols_forma <- c(1:na, nh + 1:na, 2 * nh + 1:na, 3 * nh + 1:na)   # 48: incluye el 1er armónico
+X <- coef[, cols_an]
+dim(X)
+```
+
+# Análisis de componentes principales
+
+## ¿Qué hace el ACP?
+
+- Rota los ejes para que el 1º (**PC1**) siga la dirección de **máxima varianza**,
+  el 2º la máxima varianza restante y perpendicular al 1º, etc.
+- Resume muchas variables correlacionadas en pocos ejes **no correlacionados**.
+- **No usa los grupos**: es una exploración de la variación de forma de toda la muestra.
+
+::: nota
+Los coeficientes de Fourier normalizados están en las **mismas unidades**: se usa
+la matriz de **covarianza** (sin estandarizar), como en Claude (2008). Estandarizar
+daría el mismo peso al ruido de los armónicos altos que a la forma general.
+:::
+
+## Ajuste con `princomp()`
+
+```{r pca}
+pc <- princomp(X)                    # matriz de covarianza
+var_pc <- pc$sdev^2 / sum(pc$sdev^2)
+round(rbind(proporcion = var_pc[1:6], acumulada = cumsum(var_pc)[1:6]), 3)
+```
+
+```{r scree, fig.width=7, fig.height=3.5}
+par(mar = c(4.5, 4.5, 1, 1))
+barplot(100 * var_pc[1:12], names.arg = 1:12, col = "grey70",
+        xlab = "Componente", ylab = "% de varianza")
+```
+
+`prcomp(X)` da el mismo resultado (usa SVD; signos de los ejes pueden diferir).
+
+## Plano PC1–PC2
+
+```{r plano, fig.width=8, fig.height=5}
+sc <- pc$scores
+par(mar = c(4.5, 4.5, 1, 1))
+plot(sc[, 1:2], type = "n", asp = 1,
+     xlab = sprintf("PC1 (%.1f %%)", 100 * var_pc[1]),
+     ylab = sprintf("PC2 (%.1f %%)", 100 * var_pc[2]))
+text(sc[, 1], sc[, 2], as.character(zona), col = col_z[zona], cex = 0.75)
+for (z in levels(zona))
+  lines(elipse(sc[zona == z, 1], sc[zona == z, 2], conf = 0.8), col = col_z[z], lwd = 2)
+legend("topright", nom_z, col = col_z, lwd = 2, bty = "n")
+```
+
+Elipses de confianza (80 %) con `elipse()`: las zonas se **superponen** mucho.
+
+## Cargas: ¿qué armónicos pesan en cada eje?
+
+```{r cargas, fig.width=10, fig.height=3.8}
+ev <- unclass(pc$loadings)                    # vectores propios (44 x 44)
+arm <- rep(2:na, 4)                            # armónico de cada variable
+par(mfrow = c(1, 2), mar = c(4.5, 4.5, 2, 1))
+for (j in 1:2)
+  barplot(tapply(ev[, j]^2, arm, sum), col = "steelblue", main = paste0("PC", j),
+          xlab = "Armónico", ylab = "Suma de cargas²")
+```
+
+Los primeros componentes están dominados por los **armónicos bajos** (forma
+general); los altos (detalle fino) aportan poco.
+
+# Reconstrucción de formas
+
+## Del eje a la forma (Claude 2008, pp. 246–247)
+
+1. Calcular los coeficientes de la **forma media**, *incluido* el 1er armónico.
+2. Sumar a la media el **puntaje extremo × vector propio** del eje.
+3. Como el ACP se hizo **sin** el 1er armónico, insertar un **0** en esa posición
+   de cada bloque A, B, C, D.
+4. Reconstruir el contorno con `iefourier()`.
+
+```{r auxiliares}
+forma_media <- colMeans(coef[, cols_forma])          # 48 coeficientes
+expandir <- function(v) {                             # 44 cargas -> 48 (0 en el 1er armónico)
+  m <- na - 1
+  c(0, v[1:m], 0, v[m + 1:m], 0, v[2 * m + 1:m], 0, v[3 * m + 1:m])
+}
+reconstruir <- function(cf, k = na, n = 100) {        # 48 coeficientes -> contorno
+  r <- iefourier(cf[1:na], cf[na + 1:na], cf[2 * na + 1:na], cf[3 * na + 1:na], k, n)
+  list(x = c(r$x, r$x[1]), y = c(r$y, r$y[1]))
+}
+```
+
+## Formas extremas en PC1 y PC2
+
+```{r extremos, fig.width=10, fig.height=3.8}
+par(mfrow = c(1, 2), mar = c(1, 1, 2, 1))
+for (j in 1:2) {
+  Mx <- reconstruir(forma_media + max(sc[, j]) * expandir(ev[, j]))
+  mx <- reconstruir(forma_media + min(sc[, j]) * expandir(ev[, j]))
+  plot(Mx, type = "l", asp = 1, axes = FALSE, xlab = "", ylab = "", lwd = 2,
+       col = "grey50", main = paste0("PC", j), xlim = c(-1.1, 1.1), ylim = c(-0.6, 0.6))
+  lines(mx, lwd = 2)
+}
+legend("bottomright", c("máximo", "mínimo"), col = c("grey50", "black"), lwd = 2, bty = "n")
+```
+
+## Formas a lo largo de cada eje
+
+Formas teóricas a −2, −1, 0, +1 y +2 desviaciones estándar del componente:
+
+```{r secuencia, fig.width=10, fig.height=4.2}
+par(mfrow = c(2, 5), mar = c(0.3, 0.3, 1.6, 0.3))
+for (j in 1:2) for (s in -2:2) {
+  f <- reconstruir(forma_media + s * pc$sdev[j] * expandir(ev[, j]))
+  plot(f, type = "l", asp = 1, axes = FALSE, xlab = "", ylab = "", lwd = 2,
+       xlim = c(-1.1, 1.1), ylim = c(-0.6, 0.6),
+       col = if (s == 0) "black" else "steelblue", main = sprintf("PC%d: %+d DE", j, s))
+}
+```
+
+## Morfoespacio
+
+```{r morfoespacio, fig.width=8, fig.height=5.5}
+par(mar = c(4.5, 4.5, 1, 1))
+paso <- diff(range(sc[, 1])) / 4                    # misma separación en ambos ejes
+gx <- seq(min(sc[, 1]), max(sc[, 1]), by = paso)
+gy <- seq(mean(sc[, 2]) - paso, mean(sc[, 2]) + paso, by = paso)
+plot(sc[, 1:2], type = "n", asp = 1, xlab = "PC1", ylab = "PC2",
+     xlim = range(gx) + c(-0.5, 0.5) * paso, ylim = range(gy, sc[, 2]) + c(-0.3, 0.3) * paso)
+esc <- 0.38 * paso                                  # tamaño de los contornos en el gráfico
+for (a in gx) for (b in gy) {
+  f <- reconstruir(forma_media + a * expandir(ev[, 1]) + b * expandir(ev[, 2]))
+  lines(a + esc * f$x, b + esc * f$y, col = "grey60")
+}
+points(sc[, 1:2], pch = 21, bg = col_z[zona], cex = 1.1)
+legend("topright", nom_z, pt.bg = col_z, pch = 21, bty = "n")
+```
+
+Cada contorno gris es la forma **teórica** en ese punto del plano PC1–PC2.
+
+# Interpretación
+
+## Puntajes por zona
+
+```{r boxplots, fig.width=10, fig.height=3.8}
+par(mfrow = c(1, 3), mar = c(4, 4.5, 2, 1))
+for (j in 1:3)
+  boxplot(sc[, j] ~ zona, col = adjustcolor(col_z, 0.3), border = col_z,
+          names = nom_z, main = paste0("PC", j), ylab = "Puntaje", xlab = "")
+```
+
+```{r anova}
+sapply(1:3, function(j) summary(aov(sc[, j] ~ zona))[[1]][["Pr(>F)"]][1])   # valor p por eje
+```
+
+## Cuidados al interpretar el ACP
+
+- El ACP **describe** la variación total; **no** maximiza la separación entre
+  grupos. Que las zonas se superpongan en PC1–PC2 no implica que no difieran.
+- Para **probar** diferencias y **clasificar**: MANOVA/PERMANOVA y análisis
+  discriminante (Claude 2008, secc. 6.2), sobre los coeficientes o sobre los
+  primeros componentes.
+- Con 44 variables y 20–26 otolitos por zona, las variables se acercan al número
+  de observaciones: conviene trabajar con **pocos componentes** o pocos armónicos.
+- La forma puede cambiar con la **talla** y la **edad**: si las zonas difieren en
+  talla, parte de la diferencia de forma puede ser **alometría**.
+- Revisar **puntos extremos** en el plano PC: suelen ser otolitos dañados o mal
+  digitalizados (módulos 3 y 4).
+
+## Exportar resultados
+
+```{r exportar}
+res_pc <- data.frame(id = cf$id, zona = zona, round(sc[, 1:5], 5))
+write.csv(res_pc, "datos/puntajes_acp.csv", row.names = FALSE)
+write.csv(round(ev[, 1:5], 5), "datos/cargas_acp.csv")
+head(res_pc, 3)
+```
+
+## Resumen del curso
+
+::: clave
+**Imagen** → binarización → `Conte()` → **pseudolandmarks** → **CSV/XLSX** →
+`efourier()` / `NEF()` → armónicos 2–12 → **ACP** → formas reconstruidas
+:::
+
+| Módulo | Funciones clave |
+|---|---|
+| 2 | `read.pnm()`, `binarizar()`, `Conte()` |
+| 3 | `seq()`, `equiespaciar()`, `regularradius()` |
+| 4 | `read.csv()`, `write.csv()`, `read_excel()`, `write_xlsx()`, `largo_a_array()` |
+| 5 | `efourier()`, `iefourier()`, `NEF()` |
+| 6 | `princomp()`, `elipse()`, `reconstruir()` |
+
+## Ejercicio final
+
+1. Repita el ACP con los armónicos **2–8**. ¿Cambia la varianza explicada por PC1
+   y la interpretación de las formas extremas?
+2. Agregue **D1** (elongación de la 1ª elipse) a las variables. ¿Qué componente
+   la captura?
+3. Proyecte el otolito de sardina común (módulo 3) en el ACP con
+   `predict(pc, nuevos_coeficientes)`. ¿Dónde cae respecto de la merluza de cola?
+4. Haga el ACP con `prcomp(X)` y compare los puntajes con los de `princomp()`.
+
+## Referencias
+
+- **Claude, J. (2008). *Morphometrics with R*. Springer.** Secc. 6.1.2 y fe de erratas v1.8.
+- Cadrin, S.X., Friedland, K.D. y Waldman, J.R. (eds.) (2005). *Stock Identification Methods*. Elsevier.
+- Campana, S.E. y Casselman, J.M. (1993). *Can. J. Fish. Aquat. Sci.* 50: 1062–1083.
+- Ferson, S., Rohlf, F.J. y Koehn, R.K. (1985). *Syst. Zool.* 34: 59–68.
+- Kuhl, F.P. y Giardina, C.R. (1982). *Comput. Graph. Image Process.* 18: 236–258.

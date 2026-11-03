@@ -1,0 +1,321 @@
+---
+title: "Módulo 1. Introducción a la morfometría geométrica de contornos de otolitos"
+subtitle: "Curso corto: Análisis de contornos de otolitos con R"
+author: "Luis Cubillos"
+date: "`r paste(c('Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre')[as.integer(format(Sys.Date(), '%m'))], format(Sys.Date(), '%Y'))`"
+output:
+  slidy_presentation:
+    css: estilo.css
+    font_adjustment: -4
+    footer: "Contornos de otolitos con R · Módulo 1 · Fuente: Claude (2008), Morphometrics with R"
+    fig_width: 9
+    fig_height: 4.5
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.align = "center", comment = "#>")
+for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f, encoding = "UTF-8")
+# Un otolito real (merluza de cola, Chiloé) para los ejemplos
+d1  <- read.table("datos/mcolaz1.txt")
+oto <- as.matrix(d1[1:50, ]); colnames(oto) <- c("x", "y")
+```
+
+## Objetivos del curso
+
+Al finalizar el curso el participante será capaz de:
+
+1. Explicar qué es la **forma** y por qué el contorno del otolito *sagitta* se usa
+   como marca natural para identificar stocks.
+2. **Preparar imágenes** en R: lectura, escala de grises y binarización.
+3. **Extraer el contorno** y obtener **pseudolandmarks** equiespaciados.
+4. **Organizar los datos** de contornos en archivos CSV o XLSX reproducibles.
+5. Describir el contorno con la **Transformada Elíptica de Fourier** normalizada.
+6. Explorar la variación de forma con un **Análisis de Componentes Principales**
+   (ACP) y reconstruir las formas asociadas a cada eje.
+
+<p class="fuente">Texto guía: Claude, J. (2008). <em>Morphometrics with R</em>. Springer.</p>
+
+## Programa
+
+| Módulo | Contenido | Claude (2008) |
+|---|---|---|
+| 1 | Introducción a la morfometría geométrica de contornos | Cap. 1, 2.1, 5 |
+| 2 | Imágenes en R y binarización; extracción del contorno | Secc. 2.1.1, 2.2.5–2.2.6 |
+| 3 | Pseudolandmarks a lo largo del contorno; descriptores | Secc. 2.3.3, 5.2.1 |
+| 4 | Preparación de datos en CSV o XLSX | Secc. 2.1.2, 2.4 |
+| 5 | Fourier elíptico y normalización | Secc. 5.2.3 |
+| 6 | Análisis de componentes principales de contornos | Secc. 6.1.2 |
+
+Datos de ejemplo: un otolito de sardina común (imagen) y contornos de otolitos de
+merluza de cola (*Macruronus magellanicus*) de tres zonas: Chiloé, Aysén y Magallanes.
+
+# ¿Por qué otolitos?
+
+## El otolito *sagitta* como marca natural
+
+- Los otolitos son estructuras de carbonato de calcio del oído interno de los peces;
+  la *sagitta* es el más grande en la mayoría de los teleósteos.
+- Crecen durante toda la vida y **no se reabsorben**: su forma integra la historia
+  del individuo.
+- La forma del contorno refleja factores **genéticos** y **ambientales**
+  (temperatura, alimentación, tasa de crecimiento).
+- Grupos que habitan ambientes distintos el tiempo suficiente tienden a mostrar
+  diferencias de forma → **identificación de stocks**
+  (Campana y Casselman 1993; Cadrin et al. 2005).
+- La forma también es específica de cada especie: atlas de otolitos para
+  identificación de presas y restos arqueológicos (Campana 2004).
+
+::: nota
+La forma del otolito cambia con la ontogenia: antes de comparar grupos hay que
+preguntarse **a partir de qué talla se estabiliza la forma**.
+:::
+
+## Un otolito, un contorno
+
+```{r fig-oto, fig.width=9, fig.height=4.2}
+library(pixmap)
+img <- read.pnm("datos/otolito_scom.pgm")
+par(mfrow = c(1, 2), mar = c(1, 1, 2, 1))
+ver_gris(img@grey, main = "Imagen (sardina común)")
+plot(oto, type = "n", asp = 1, axes = FALSE, xlab = "", ylab = "",
+     main = "Contorno: 50 puntos (x, y)")
+polygon(oto, col = "grey90", border = "grey40", lwd = 2)
+points(oto, pch = 21, bg = "white", cex = 0.9)
+points(oto[1, , drop = FALSE], pch = 19, col = "red", cex = 1.4)
+```
+
+El contorno es una **curva cerrada**: el análisis convierte esa curva en números
+comparables entre individuos.
+
+# Morfometría: conceptos básicos
+
+## Morfología y morfometría
+
+- **Morfología**: ciencia biológica que estudia la forma de los organismos y sus
+  transformaciones (alometría, simetría, segmentación, plan corporal…).
+- **Morfometría**: *estudio estadístico de la forma y el tamaño, y de su
+  covariación con otras variables* (Claude 2008, p. 1).
+
+::: clave
+**Forma**: propiedad geométrica de un objeto que es **invariante** a la traslación,
+la rotación y el cambio de escala.
+
+**Tamaño**: un escalar basado en distancias o coordenadas de puntos del objeto
+(p. ej., perímetro, área, tamaño del centroide).
+:::
+
+Color y textura son atributos del objeto, pero **no** son forma.
+
+## Forma = lo que queda al quitar posición, orientación y escala
+
+```{r fig-invariancia, fig.width=10, fig.height=4}
+rot <- function(M, a) M %*% matrix(c(cos(a), sin(a), -sin(a), cos(a)), 2, 2)
+M0 <- scale(oto, scale = FALSE)
+M1 <- rot(M0, pi / 5) * 0.6 + matrix(c(400, 150), 50, 2, byrow = TRUE)
+M2 <- rot(M0, -pi / 3) * 1.4 + matrix(c(-350, -250), 50, 2, byrow = TRUE)
+par(mfrow = c(1, 2), mar = c(2, 2, 2, 1))
+plot(rbind(M0, M1, M2), type = "n", asp = 1, xlab = "", ylab = "",
+     main = "Mismo otolito: 3 posiciones, tamaños y rotaciones")
+polygon(M0, border = 1, lwd = 2); polygon(M1, border = 2, lwd = 2); polygon(M2, border = 4, lwd = 2)
+norm <- function(M) { M <- scale(M, scale = FALSE); M / sqrt(sum(M^2)) }
+N0 <- norm(M0); N1 <- rot(norm(M1), -pi / 5); N2 <- rot(norm(M2), pi / 3)
+plot(N0, type = "n", asp = 1, xlab = "", ylab = "", main = "Tras centrar, escalar y rotar: una sola forma")
+polygon(N0, border = 1, lwd = 6); polygon(N1, border = 2, lwd = 3, lty = 2); polygon(N2, border = 4, lwd = 1.5)
+```
+
+La morfometría geométrica trabaja con **coordenadas** y elimina explícitamente esos
+tres efectos antes de comparar.
+
+## Breve historia
+
+- **Morfometría tradicional**: distancias, ángulos y proporciones *ad hoc*
+  analizados con estadística uni-, bi- y multivariada.
+- **D'Arcy Thompson (1917)**, *On Growth and Form*: grillas de deformación entre
+  especies de peces → la forma como **transformación** geométrica.
+- Fines del siglo XX: la "revolución morfométrica" (Rohlf y Marcus 1993):
+  superposición de Procrustes, *thin-plate splines*, **análisis de Fourier de
+  contornos**, EDMA.
+- Hoy la morfometría considera la forma **como un todo** y la interdependencia de
+  sus partes, con descriptores y estadística propios (Claude 2008, cap. 1).
+
+## Morfometría tradicional vs. geométrica
+
+```{r fig-medidas, fig.width=10, fig.height=3.8}
+t <- seq(0, 2 * pi, length = 200)
+a <- cbind(cos(t), 0.6 * sin(t))                                  # elipse
+b <- cbind(cos(t) * (1 + 0.12 * cos(3 * t)), 0.6 * sin(t) * (1 + 0.15 * cos(5 * t)))
+c3 <- cbind(sign(cos(t)) * abs(cos(t))^0.4, 0.6 * sign(sin(t)) * abs(sin(t))^0.4)
+ajustar <- function(s) {                 # largo 2 y ancho 1.2, centrada en 0
+  s <- sweep(s, 2, apply(s, 2, function(v) mean(range(v))))
+  sweep(s, 2, apply(s, 2, function(v) diff(range(v))) / c(2, 1.2), "/")
+}
+par(mfrow = c(1, 3), mar = c(1, 1, 2.5, 1))
+for (s in lapply(list(a, b, c3), ajustar)) {
+  plot(s, type = "n", asp = 1, axes = FALSE, xlim = c(-1.1, 1.2), ylim = c(-0.8, 0.65), xlab = "", ylab = "",
+       main = sprintf("largo = %.1f   ancho = %.1f", diff(range(s[, 1])), diff(range(s[, 2]))))
+  polygon(s, col = "grey90", border = "grey30", lwd = 2)
+  arrows(min(s[, 1]), -0.75, max(s[, 1]), -0.75, code = 3, length = 0.08, col = "red")
+  arrows(1.15, min(s[, 2]), 1.15, max(s[, 2]), code = 3, length = 0.08, col = "red")
+}
+```
+
+Tres formas con **el mismo largo y ancho**: las medidas lineales no capturan la
+forma. La morfometría geométrica conserva la **posición relativa** de todos los
+puntos durante el análisis, por lo que permite **reconstruir** la forma.
+
+## Dimensiones
+
+- **k = 1**: forma, tamaño y forma se superponen; basta la estadística clásica
+  (p. ej., ANOVA de longitudes).
+- **k = 2 o 3**: volúmenes, superficies, **contornos**, posiciones de puntos;
+  separar tamaño y forma ya no es trivial (Claude 2008, sección 1.2).
+
+El otolito *sagitta* se fotografía en **2D** (vista de la cara interna o
+*sulcus*): su contorno es una curva cerrada en el plano.
+
+# Landmarks y pseudolandmarks
+
+## Landmarks (puntos homólogos)
+
+Un **landmark** es un punto cuya posición es **comparable entre objetos**.
+Bookstein (1991) reconoce tres tipos:
+
+| Tipo | Definición | Ejemplo |
+|---|---|---|
+| I | Yuxtaposición discreta de tejidos; homología biológica más fuerte | Foramen, unión de suturas |
+| II | Máximo de curvatura; posible base en el desarrollo | Punta de un proceso |
+| III | Extremo geométrico: fin de un diámetro, centroide, intersección | Punto más anterior |
+
+- **Landmark difuso** (*fuzzy*): estructura reconocible pero sin límites nítidos.
+- **Pseudolandmarks**: puntos definidos **por construcción**, por ejemplo
+  equiespaciados sobre un contorno.
+
+<p class="fuente">Claude (2008), sección 1.2; Bookstein (1991).</p>
+
+## ¿Landmarks o contornos en otolitos?
+
+- El otolito tiene **pocos landmarks homólogos** claros (punta del rostro,
+  antirostro, excisura) y su posición puede ser ambigua.
+- Gran parte de la información está en la **forma del borde**: lóbulos,
+  crenulaciones, curvatura dorsal y ventral.
+- Solución: describir el **contorno completo** con muchos **pseudolandmarks**
+  muestreados regularmente.
+
+```{r fig-pseudo, fig.width=9, fig.height=3.6}
+Xc <- colMeans(oto)
+par(mfrow = c(1, 2), mar = c(1, 1, 2, 1))
+plot(oto, type = "l", asp = 1, axes = FALSE, xlab = "", ylab = "", main = "Abscisa curvilínea (igual distancia)")
+points(oto, pch = 21, bg = "white")
+rr <- regularradius(oto[, 1], oto[, 2], 24)
+plot(oto, type = "l", asp = 1, axes = FALSE, xlab = "", ylab = "", main = "Radios equiangulares (igual ángulo)")
+segments(Xc[1], Xc[2], rr$coord[, 1] + Xc[1], rr$coord[, 2] + Xc[2], col = "grey60")
+points(rr$coord[, 1] + Xc[1], rr$coord[, 2] + Xc[2], pch = 21, bg = "white")
+```
+
+## Configuraciones
+
+- Una **configuración** es el conjunto de coordenadas de los landmarks (o
+  pseudolandmarks) de un objeto: una matriz **p × k** (puntos × dimensiones).
+- Todas las configuraciones deben tener **el mismo número de puntos, en el mismo
+  orden**: el punto *i* de un otolito se compara con el punto *i* de otro.
+- En contornos, eso exige el **mismo punto de inicio** y el **mismo sentido** de
+  recorrido.
+
+```{r echo=TRUE}
+dim(oto)      # 50 pseudolandmarks x 2 coordenadas
+head(oto, 3)
+```
+
+# Métodos para analizar contornos
+
+## Del contorno a variables de forma
+
+Claude (2008, cap. 5) describe tres familias de análisis de Fourier de contornos
+cerrados:
+
+| Método | Qué se descompone | Ventaja | Limitación |
+|---|---|---|---|
+| Fourier de **radios** (polar) | Radio *r(θ)* desde el centroide | Simple, pocos coeficientes | Falla si un radio corta el contorno 2 veces; muestreo desigual |
+| Fourier del **ángulo tangente** (Zahn y Roskies 1972) | Cambio del ángulo tangente a lo largo del perímetro | Admite concavidades | Sensible al ruido de digitalización |
+| Fourier **elíptico** (Kuhl y Giardina 1982) | *x(t)* e *y(t)* por separado, en función de la abscisa curvilínea | Cualquier contorno cerrado; normalizable; reconstruye bien con pocos armónicos | 4 coeficientes por armónico |
+
+También existen el análisis de *eigenshape* y las *wavelets*. En otolitos, el
+**Fourier elíptico normalizado** es el más usado y es el que veremos.
+
+## Índices de forma (enfoque clásico)
+
+Antes de Fourier, la forma se resumía con índices adimensionales calculados a
+partir de área (*A*), perímetro (*P*), largo (*L*) y ancho (*W*):
+
+| Índice | Fórmula | Círculo |
+|---|---|---|
+| Circularidad | $P^2 / A$ | $4\pi \approx 12.6$ |
+| Redondez | $4A / (\pi L^2)$ | 1 |
+| Rectangularidad | $A / (L \cdot W)$ | $\pi/4$ |
+| Elipticidad | $(L - W) / (L + W)$ | 0 |
+| Razón de aspecto | $L / W$ | 1 |
+
+Útiles y fáciles de interpretar, pero **resumen** la forma: no permiten
+reconstruirla. Se calculan en el módulo 3.
+
+## Flujo de trabajo del curso
+
+::: clave
+**Imagen** → escala de grises → **binarización** → **contorno** (píxeles) →
+**pseudolandmarks** (50 puntos) → **archivo CSV/XLSX** → **Fourier elíptico
+normalizado** → selección de armónicos → **ACP** → formas reconstruidas
+:::
+
+- Módulos 2 y 3: de la imagen a los pseudolandmarks.
+- Módulo 4: datos ordenados y reproducibles.
+- Módulos 5 y 6: descriptores de forma y exploración multivariada.
+
+## ¿Por qué R?
+
+- Gratuito, multiplataforma y con miles de paquetes.
+- Todo el análisis queda en un **script**: se corrigen errores, se reutiliza
+  con nuevos datos y queda el registro de lo hecho (Claude 2008, sección 1.3).
+- Las funciones de Claude (2008) son cortas y legibles: se entiende **qué** hace
+  cada paso.
+
+Paquetes usados en el curso:
+
+```{r echo=TRUE, eval=FALSE}
+install.packages(c("pixmap", "readxl", "writexl", "magick"))
+# Funciones de Claude (2008) incluidas en la carpeta R/ del curso:
+# Conte, regularradius, efourier, iefourier, NEF, elipse
+for (f in list.files("R", full.names = TRUE)) source(f)
+```
+
+## Recomendaciones para la toma de imágenes
+
+- Mismo **aumento**, iluminación y fondo en todas las fotos.
+- Incluir una **escala** (regla o micrómetro) en la imagen.
+- Misma **orientación**: otolito izquierdo, cara interna (*sulcus*) hacia la
+  cámara, rostro hacia la izquierda.
+- Fondo **contrastante** (negro con luz reflejada) para facilitar la binarización.
+- Registrar en una planilla: código del otolito, zona, talla, sexo, edad, lado.
+
+::: nota
+La calidad de los datos determina la calidad de los resultados: el error de
+medición proviene tanto del operador como de los instrumentos (Claude 2008, cap. 2).
+:::
+
+## Referencias
+
+- Bookstein, F.L. (1991). *Morphometric Tools for Landmark Data*. Cambridge University Press.
+- Cadrin, S.X., Friedland, K.D. y Waldman, J.R. (eds.) (2005). *Stock Identification
+  Methods*. Elsevier Academic Press.
+- Campana, S.E. (2004). *Photographic Atlas of Fish Otoliths of the Northwest
+  Atlantic Ocean*. NRC Research Press.
+- Campana, S.E. y Casselman, J.M. (1993). Stock discrimination using otolith shape
+  analysis. *Can. J. Fish. Aquat. Sci.* 50: 1062–1083.
+- **Claude, J. (2008). *Morphometrics with R*. Springer.**
+- Kuhl, F.P. y Giardina, C.R. (1982). Elliptic Fourier features of a closed contour.
+  *Comput. Graph. Image Process.* 18: 236–258.
+- Rohlf, F.J. y Marcus, L.F. (1993). A revolution in morphometrics. *Trends Ecol. Evol.* 8: 129–132.
+- Thompson, D'A.W. (1917). *On Growth and Form*. Cambridge University Press.
+- Zahn, C.T. y Roskies, R.Z. (1972). Fourier descriptors for plane closed curves.
+  *IEEE Trans. Comput.* C-21: 269–281.
